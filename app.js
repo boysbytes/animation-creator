@@ -481,7 +481,7 @@ function AnimationCreator() {
         width: canvasSize.width,
         height: canvasSize.height,
         // Specify the path to the worker script relative to the HTML page
-        workerScript: 'https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.worker.js'
+        workerScript: 'gif.worker.js'
       });
 
       frames.forEach(frame => {
