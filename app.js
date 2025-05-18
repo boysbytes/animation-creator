@@ -747,12 +747,31 @@ function AnimationCreator() {
           </div>
         </div>
         {/* Canvas area (SINGLE instance) */}
-        <div ref={canvasWrapperRef} className="flex-1 flex flex-col items-center justify-center bg-white rounded-lg shadow-md p-2 relative overflow-hidden order-1 lg:order-2">
+        <div
+          ref={canvasWrapperRef}
+          className="
+            flex-1 flex flex-col items-center justify-center
+            bg-white rounded-lg shadow-md p-2
+            relative overflow-auto order-1 lg:order-2
+            max-h-[80vh] max-w-full
+          "
+          style={{ minWidth: 0 }}
+        >
           <canvas
             ref={canvasRef}
             width={canvasSize.width}
             height={canvasSize.height}
-            style={{ width: "100%", height: "auto", border: "1px solid #ccc", background: "#fff", touchAction: "none" }}
+            style={{
+              width: "100%",
+              maxWidth: "900px",
+              height: "auto",
+              maxHeight: "70vh",
+              border: "1px solid #ccc",
+              background: "#fff",
+              touchAction: "none",
+              display: "block",
+              margin: "0 auto"
+            }}
             onMouseDown={handleMouseDown}
             onMouseMove={handleMouseMove}
             onMouseUp={handleMouseUp}
