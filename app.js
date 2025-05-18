@@ -61,10 +61,46 @@ function colorsMatch(c1, c2) {
   return c1.r === c2.r && c1.g === c2.g && c1.b === c2.b && c1.a === c2.a;
 }
 
+// Helper function to generate SVG string from Lucide icon data array
+function generateSvgString(iconData) {
+  if (!Array.isArray(iconData)) {
+    console.error("Invalid icon data format:", iconData);
+    return ''; // Return empty string for invalid data
+  }
+
+  let svgContent = '';
+
+  iconData.forEach(elementData => {
+    if (!Array.isArray(elementData) || elementData.length !== 2) {
+      console.warn("Unexpected element data format:", elementData);
+      return; // Skip malformed element data
+    }
+
+    const elementType = elementData[0]; // e.g., 'path', 'circle'
+    const attributes = elementData[1]; // e.g., { d: '...', stroke: '...' }
+
+    let attributeString = '';
+    for (const attrName in attributes) {
+      // Use hasOwnProperty to ensure we only get object's own properties
+      if (Object.prototype.hasOwnProperty.call(attributes, attrName)) {
+        // Basic attribute serialization
+        attributeString += ` ${attrName}="${attributes[attrName]}"`;
+      }
+    }
+
+    // Construct the element tag. Assuming common SVG icon elements.
+    svgContent += `<${elementType}${attributeString}></${elementType}>`;
+  });
+
+  // Wrap the content in an SVG tag with standard Lucide attributes
+  const svgAttributes = 'xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+
+  return `<svg ${svgAttributes}>${svgContent}</svg>`;
+}
+
+
 function AnimationCreator() {
   // Removed duplicate useState, useRef, useEffect import as it's already at the top
-  // const { useState, useRef, useEffect } = React;
-
 
   // ==== State ====
   const [frames, setFrames] = useState([{ id: Date.now(), data: null }]);
@@ -115,68 +151,19 @@ function AnimationCreator() {
 
         // Set a maximum drawing resolution, independent of display size
         const maxDrawingWidth = 1024; // Maximum pixel width for drawing
-        // Scale down drawing dimensions if needed to fit within maxDrawingWidth
-        const scaleFactor = maxDrawingWidth / canvasSize.width; // Calculate based on *current* drawing size
-        let drawingWidth = canvasSize.width;
-        let drawingHeight = canvasSize.height;
 
-        if (newWidth > maxDrawingWidth) {
-            // If the display size is larger than the max drawing width,
-            // we don't want to increase the drawing resolution further.
-            // Instead, scale the canvas *style* to fit, but keep drawing resolution capped.
-            // This part of the logic seems a bit complex and might need refinement
-            // depending on desired behavior (e.g., always scale canvas to fit container,
-            // but drawing resolution is fixed or capped).
-            // For now, let's ensure the *drawing* size doesn't exceed the cap.
-            // A simpler approach might be to decouple display size from drawing size,
-            // but the current code attempts to link them somewhat.
-            // Let's keep the original intent but ensure the drawing size doesn't grow past the limit.
-            // If newWidth (display width) exceeds maxDrawingWidth, the calculation above already
-            // limits the *display* width based on height. Let's focus on the *canvas element's*
-            // width and height attributes, which determine drawing resolution.
-            // The current logic is setting the canvas width/height based on the wrapper size,
-            // then capping the display width. This might lead to a canvas that is
-            // high-resolution but styled smaller.
+        // Calculate the target drawing dimensions based on the display size, capped by maxDrawingWidth
+        let targetDrawingWidth = Math.min(maxDrawingWidth, Math.floor(newWidth));
+        let targetDrawingHeight = Math.floor(targetDrawingWidth * (2/3)); // Maintain aspect ratio for drawing
 
-            // A simpler revised logic: calculate desired display size based on wrapper,
-            // then calculate the corresponding drawing size, capped by maxDrawingWidth.
-             let displayWidth = rect.width;
-             let displayHeight = Math.floor(displayWidth * (2/3));
-
-             if (displayHeight > rect.height) {
-                displayHeight = rect.height;
-                displayWidth = Math.floor(displayHeight * (3/2));
-             }
-
-             displayWidth = Math.max(150, displayWidth);
-             displayHeight = Math.max(100, displayHeight);
-
-             let currentDrawingWidth = canvasSize.width;
-             let currentDrawingHeight = canvasSize.height;
-
-             // If the currently displayed canvas size implies a larger drawing size
-             // than the maxDrawingWidth, cap the *drawing* size.
-             // Assuming a 1:1 mapping for simplicity here, but responsive might scale.
-             // Let's use the calculated *display* dimensions to inform potential *drawing* dimensions.
-
-             // If we want the *drawing* canvas to scale with the wrapper but cap at maxDrawingWidth:
-             let targetDrawingWidth = Math.min(maxDrawingWidth, Math.floor(displayWidth));
-             let targetDrawingHeight = Math.floor(targetDrawingWidth * (2/3)); // Maintain aspect ratio
+        // Ensure drawing height doesn't exceed calculated display height (could happen if display is very tall and narrow)
+        targetDrawingHeight = Math.min(targetDrawingHeight, Math.floor(newHeight));
+        targetDrawingWidth = Math.floor(targetDrawingHeight * (3/2)); // Adjust width based on height cap
 
 
-             if (canvasSize.width !== targetDrawingWidth || canvasSize.height !== targetDrawingHeight) {
-                 setCanvasSize({ width: targetDrawingWidth, height: targetDrawingHeight });
-             }
-
-
-        } else {
-             // If the display width is within the limit, scale drawing size directly
-             // based on the calculated display size to maintain responsive drawing area.
-             if (canvasSize.width !== newWidth || canvasSize.height !== newHeight) {
-                 setCanvasSize({ width: newWidth, height: newHeight });
-             }
-        }
-
+        if (canvasSize.width !== targetDrawingWidth || canvasSize.height !== targetDrawingHeight) {
+          setCanvasSize({ width: targetDrawingWidth, height: targetDrawingHeight });
+        }
       }
     };
 
@@ -396,18 +383,14 @@ function AnimationCreator() {
 
       const currentSavedProjects = JSON.parse(localStorage.getItem('animationDrawProjects') || '[]');
 
-      // Filter out any existing project with the same name (optional: could also overwrite by ID)
-      // For simplicity, let's just add and manage by limit for now.
-      // A better approach might be to find by ID and update if it exists.
-      // Let's update if ID exists, otherwise add as new.
+      // Update if ID exists, otherwise add as new.
       let updatedProjects;
-      const existingProjectIndex = currentSavedProjects.findIndex(p => p.name === projectName);
+      const existingProjectIndex = currentSavedProjects.findIndex(p => p.name === projectName); // Check by name for simplicity
 
       if (existingProjectIndex > -1) {
           // Update existing project (replace it)
           updatedProjects = [...currentSavedProjects];
           updatedProjects[existingProjectIndex] = projectData;
-           // Keep the order, just update the entry
       } else {
           // Add new project to the beginning
           updatedProjects = [projectData, ...currentSavedProjects];
@@ -416,7 +399,6 @@ function AnimationCreator() {
                updatedProjects = updatedProjects.slice(0, 20);
            }
       }
-
 
       localStorage.setItem('animationDrawProjects', JSON.stringify(updatedProjects));
       setSavedProjects(updatedProjects); // Update state to reflect saved projects
@@ -748,28 +730,28 @@ function AnimationCreator() {
               onClick={() => setShowSaveModal(true)}
               className="flex items-center justify-center gap-2 p-2 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
               // --- START Lucide icon changes ---
-              dangerouslySetInnerHTML={{__html: lucide.icons['Save']() + " Save"}}
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Save']) + " Save"}}
               // --- END Lucide icon changes ---
             />
             <button
               onClick={() => setShowLoadModal(true)}
               className="flex items-center justify-center gap-2 p-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
               // --- START Lucide icon changes ---
-              dangerouslySetInnerHTML={{__html: lucide.icons['Upload']() + " Load"}} // Assuming 'Upload' is used for load
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Upload']) + " Load"}} // Assuming 'Upload' is used for load
               // --- END Lucide icon changes ---
             />
             <button
               onClick={exportGif}
               className="flex items-center justify-center gap-2 p-2 bg-pink-500 text-white rounded hover:bg-pink-600 text-sm"
               // --- START Lucide icon changes ---
-              dangerouslySetInnerHTML={{__html: lucide.icons['Download']() + " Export GIF"}}
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Download']) + " Export GIF"}}
               // --- END Lucide icon changes ---
             />
             <button
               onClick={exportVideo}
               className="flex items-center justify-center gap-2 p-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 text-sm"
               // --- START Lucide icon changes ---
-              dangerouslySetInnerHTML={{__html: lucide.icons['Download']() + " Export Video"}}
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Download']) + " Export Video"}}
               // --- END Lucide icon changes ---
             />
           </div>
@@ -795,7 +777,7 @@ function AnimationCreator() {
               onClick={() => setCurrentFrame(f => Math.max(0, f - 1))}
               className="p-2 bg-gray-200 rounded hover:bg-gray-300"
               // --- START Lucide icon changes ---
-              dangerouslySetInnerHTML={{__html: lucide.icons['ChevronRight']().replace('rotate(0 12 12)', 'rotate(180 12 12)')}}
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['ChevronRight']).replace('rotate(0 12 12)', 'rotate(180 12 12)')}}
               // --- END Lucide icon changes ---
             />
             <span className="text-sm font-semibold flex items-center">
@@ -805,35 +787,99 @@ function AnimationCreator() {
               onClick={() => setCurrentFrame(f => Math.min(frames.length - 1, f + 1))}
               className="p-2 bg-gray-200 rounded hover:bg-gray-300"
               // --- START Lucide icon changes ---
-              dangerouslySetInnerHTML={{__html: lucide.icons['ChevronRight']()}}
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['ChevronRight'])}}
               // --- END Lucide icon changes ---
             />
             <button
               onClick={addFrame}
               className="p-2 bg-blue-200 rounded hover:bg-blue-300"
               // --- START Lucide icon changes ---
-              dangerouslySetInnerHTML={{__html: lucide.icons['Plus']()}}
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Plus'])}}
               // --- END Lucide icon changes ---
             />
             <button
               onClick={duplicateFrame}
               className="p-2 bg-yellow-200 rounded hover:bg-yellow-300"
               // --- START Lucide icon changes ---
-              dangerouslySetInnerHTML={{__html: lucide.icons['Copy']()}}
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Copy'])}}
               // --- END Lucide icon changes ---
             />
             <button
               onClick={deleteFrame}
               className="p-2 bg-red-200 rounded hover:bg-red-300"
               // --- START Lucide icon changes ---
-              dangerouslySetInnerHTML={{__html: lucide.icons['Trash2']()}}
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Trash2'])}}
               // --- END Lucide icon changes ---
             />
             <button
               onClick={togglePlay}
               className={`p-2 rounded ${isPlaying ? 'bg-green-200 hover:bg-green-300' : 'bg-gray-200 hover:bg-gray-300'}`}
               // --- START Lucide icon changes ---
-              dangerouslySetInnerHTML={{__html: lucide.icons[isPlaying ? 'Pause' : 'Play']()}}
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons[isPlaying ? 'Pause' : 'Play'])}}
+              // --- END Lucide icon changes ---
+            />
+          </div>
+        </div>
+        {/* Canvas area */}
+        <div ref={canvasWrapperRef} className="flex-1 flex flex-col items-center justify-center bg-white rounded-lg shadow-md p-2 relative overflow-hidden order-1 lg:order-2">
+          <canvas
+            ref={canvasRef}
+            width={canvasSize.width}
+            height={canvasSize.height}
+            style={{ width: "100%", height: "auto", border: "1px solid #ccc", background: "#fff", touchAction: "none" }}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+          />
+          {/* Frame Controls */}
+          <div className="flex flex-row gap-2 mt-2">
+            <button
+              onClick={() => setCurrentFrame(f => Math.max(0, f - 1))}
+              className="p-2 bg-gray-200 rounded hover:bg-gray-300"
+              // --- START Lucide icon changes ---
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['ChevronRight']).replace('rotate(0 12 12)', 'rotate(180 12 12)')}}
+              // --- END Lucide icon changes ---
+            />
+            <span className="text-sm font-semibold flex items-center">
+              Frame {currentFrame + 1} / {frames.length}
+            </span>
+            <button
+              onClick={() => setCurrentFrame(f => Math.min(frames.length - 1, f + 1))}
+              className="p-2 bg-gray-200 rounded hover:bg-gray-300"
+              // --- START Lucide icon changes ---
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['ChevronRight'])}}
+              // --- END Lucide icon changes ---
+            />
+            <button
+              onClick={addFrame}
+              className="p-2 bg-blue-200 rounded hover:bg-blue-300"
+              // --- START Lucide icon changes ---
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Plus'])}}
+              // --- END Lucide icon changes ---
+            />
+            <button
+              onClick={duplicateFrame}
+              className="p-2 bg-yellow-200 rounded hover:bg-yellow-300"
+              // --- START Lucide icon changes ---
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Copy'])}}
+              // --- END Lucide icon changes ---
+            />
+            <button
+              onClick={deleteFrame}
+              className="p-2 bg-red-200 rounded hover:bg-red-300"
+              // --- START Lucide icon changes ---
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Trash2'])}}
+              // --- END Lucide icon changes ---
+            />
+            <button
+              onClick={togglePlay}
+              className={`p-2 rounded ${isPlaying ? 'bg-green-200 hover:bg-green-300' : 'bg-gray-200 hover:bg-gray-300'}`}
+              // --- START Lucide icon changes ---
+              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons[isPlaying ? 'Pause' : 'Play'])}}
               // --- END Lucide icon changes ---
             />
           </div>
@@ -884,12 +930,12 @@ function AnimationCreator() {
               </div>
               <button onClick={() => loadProject(project)} className="p-1 text-green-700 hover:bg-green-100 rounded"
                   // --- START Lucide icon changes ---
-                dangerouslySetInnerHTML={{__html: lucide.icons['Check']()}}
+                dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Check'])}}
                   // --- END Lucide icon changes ---
               />
               <button onClick={() => deleteSavedProject(project.id)} className="p-1 text-red-700 hover:bg-red-100 rounded"
                   // --- START Lucide icon changes ---
-                dangerouslySetInnerHTML={{__html: lucide.icons['Trash2']()}}
+                dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Trash2'])}}
                   // --- END Lucide icon changes ---
               />
             </div>
