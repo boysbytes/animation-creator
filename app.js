@@ -532,90 +532,123 @@ function AnimationCreator() {
   };
 
   // ==== Export Video (WebM) ====
-  const exportVideo = () => {
-    if (typeof window.MediaRecorder === 'undefined') {
-      alert('Video recording is not supported in your browser.');
-      return;
-    }
+const exportVideo = () => {
+  if (typeof window.MediaRecorder === 'undefined') {
+    alert('Video recording is not supported in your browser.');
+    return;
+  }
 
-    // Need a canvas to record from
-    const videoCanvas = document.createElement('canvas');
-    videoCanvas.width = canvasSize.width;
-    videoCanvas.height = canvasSize.height;
-    const ctx = videoCanvas.getContext('2d');
+  // Set up video canvas
+  const videoCanvas = document.createElement('canvas');
+  videoCanvas.width = canvasSize.width;
+  videoCanvas.height = canvasSize.height;
+  const ctx = videoCanvas.getContext('2d');
 
-    // Create a stream from the canvas at the desired frame rate
-    const stream = videoCanvas.captureStream(fps);
-    const recorder = new window.MediaRecorder(stream, { mimeType: 'video/webm' });
+  // Prepare to record from the canvas at the desired frame rate
+  const stream = videoCanvas.captureStream(fps);
+  let recorder;
+  try {
+    recorder = new window.MediaRecorder(stream, { mimeType: 'video/webm' });
+  } catch (e) {
+    alert('Failed to start video recorder. Please try a different browser.');
+    return;
+  }
 
-    const chunks = [];
-    recorder.ondataavailable = e => {
-      if (e.data.size > 0) {
-        chunks.push(e.data);
-      }
-    };
+  const chunks = [];
+  recorder.ondataavailable = e => {
+    if (e.data.size > 0) {
+      chunks.push(e.data);
+    }
+  };
 
-    recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${projectName || 'animation'}.webm`; // Default filename
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url); // Clean up
-      console.log('Video export finished.');
-    };
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${projectName || 'animation'}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    console.log('Video export finished.');
+  };
 
-    recorder.onerror = (event) => {
-        console.error("MediaRecorder error:", event.error);
-        alert("Error occurred during video recording.");
+  recorder.onerror = (event) => {
+    console.error("MediaRecorder error:", event.error);
+    alert("Error occurred during video recording.");
+  };
+
+  let currentFrameIndex = 0;
+  const frameInterval = 1000 / fps;
+
+  function drawAndAdvance() {
+    if (currentFrameIndex >= frames.length) {
+      recorder.stop();
+      return;
+    }
+
+    const frame = frames[currentFrameIndex];
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, videoCanvas.width, videoCanvas.height);
+
+    if (frame.data) {
+      const img = new window.Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, videoCanvas.width, videoCanvas.height);
+        setTimeout(() => {
+          currentFrameIndex++;
+          drawAndAdvance();
+        }, frameInterval);
+      };
+      img.onerror = () => {
+        // Skip this frame but maintain timing
+        setTimeout(() => {
+          currentFrameIndex++;
+          drawAndAdvance();
+        }, frameInterval);
+      };
+      img.src = frame.data;
+    } else {
+      // Blank frame, maintain timing
+      setTimeout(() => {
+        currentFrameIndex++;
+        drawAndAdvance();
+      }, frameInterval);
+    }
+  }
+
+  // Draw first frame, then start recorder just before advancing frames
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, videoCanvas.width, videoCanvas.height);
+
+  if (frames[0] && frames[0].data) {
+    const img = new window.Image();
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, videoCanvas.width, videoCanvas.height);
+      recorder.start();
+      setTimeout(() => {
+        currentFrameIndex = 1;
+        drawAndAdvance();
+      }, frameInterval);
     };
+    img.onerror = () => {
+      recorder.start();
+      setTimeout(() => {
+        currentFrameIndex = 1;
+        drawAndAdvance();
+      }, frameInterval);
+    };
+    img.src = frames[0].data;
+  } else {
+    recorder.start();
+    setTimeout(() => {
+      currentFrameIndex = 1;
+      drawAndAdvance();
+    }, frameInterval);
+  }
+};
 
-
-    recorder.start(); // Start recording
-
-    let currentFrameIndex = 0;
-    const frameInterval = 1000 / fps; // Time in ms for each frame
-
-    const drawNextFrameForVideo = () => {
-      if (currentFrameIndex >= frames.length) {
-        recorder.stop(); // Stop recording when all frames are drawn
-        return;
-      }
-
-      const frame = frames[currentFrameIndex];
-      // Draw frame to the recording canvas
-      ctx.fillStyle = '#ffffff'; // Clear with background color
-      ctx.fillRect(0, 0, videoCanvas.width, videoCanvas.height);
-
-      if (frame.data) {
-        const img = new window.Image();
-        img.onload = () => {
-          ctx.drawImage(img, 0, 0, videoCanvas.width, videoCanvas.height);
-          currentFrameIndex++;
-          // Schedule drawing the next frame after the correct interval
-          setTimeout(drawNextFrameForVideo, frameInterval);
-        };
-        img.onerror = () => {
-          console.error("Failed to load frame image for video export:", frame.data);
-          // Still advance to the next frame even if image fails to load
-          currentFrameIndex++;
-          setTimeout(drawNextFrameForVideo, frameInterval);
-        }
-        img.src = frame.data;
-      } else {
-        // If frame has no data, just draw a blank frame and move to next
-        currentFrameIndex++;
-        setTimeout(drawNextFrameForVideo, frameInterval);
-      }
-    };
-
-    // Start the process of drawing frames for the video
-    drawNextFrameForVideo();
-
-  };
 
   // ==== Flood fill implementation ====
   function floodFill(canvas, startX, startY, newColorHex) {
