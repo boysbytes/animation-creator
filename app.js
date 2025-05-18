@@ -148,7 +148,7 @@ function AnimationCreator() {
         newHeight = Math.max(100, newHeight);
 
         // Set a maximum drawing resolution, independent of display size
-        const maxDrawingWidth = 1024; // Maximum pixel width for drawing
+        const maxDrawingWidth = 800; // Maximum pixel width for drawing
 
         // Calculate the target drawing dimensions based on the display size, capped by maxDrawingWidth
         let targetDrawingWidth = Math.min(maxDrawingWidth, Math.floor(newWidth));
