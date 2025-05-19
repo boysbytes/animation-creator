@@ -382,18 +382,35 @@ function handleDown(e) {
       alert('GIF.js not loaded!');
       return;
     }
+    const scale = 3;
     const gif = new window.GIF({
       workers: 2,
       quality: 10,
-      width: SPRITE_SIZE * 3,
-      height: SPRITE_SIZE * 3,
+      width: SPRITE_SIZE * scale,
+      height: SPRITE_SIZE * scale,
       workerScript: 'gif.worker.js'
     });
-    frames.forEach(f => {
-      const img = new window.Image();
-      img.src = renderFrameToDataURL(f, 3);
-      gif.addFrame(img, { delay: 1000 / fps, copy: true });
+  
+    // Create a temporary canvas to draw each frame
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = SPRITE_SIZE * scale;
+    tempCanvas.height = SPRITE_SIZE * scale;
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.imageSmoothingEnabled = false;
+  
+    frames.forEach(frame => {
+      tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+      for (let y = 0; y < SPRITE_SIZE; y++) {
+        for (let x = 0; x < SPRITE_SIZE; x++) {
+          const color = frame[getIndex(x, y)] || '#00000000';
+          if (color.length === 9 && color.endsWith('00')) continue; // skip transparent
+          tempCtx.fillStyle = color;
+          tempCtx.fillRect(x * scale, y * scale, scale, scale);
+        }
+      }
+      gif.addFrame(tempCtx, { copy: true, delay: 1000 / fps });
     });
+  
     gif.on('finished', (blob) => {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -406,6 +423,7 @@ function handleDown(e) {
     });
     gif.render();
   }
+
 
   // --- Export to File ---
   function exportToFile() {
