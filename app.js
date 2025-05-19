@@ -399,9 +399,11 @@ function handleDown(e) {
     tempCtx.imageSmoothingEnabled = false;
   
     frames.forEach(frame => {
-      // Clear the canvas first!
+      // Clear the canvas and fill with white (or any background color you want)
       tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
-  
+      tempCtx.fillStyle = "#fff"; // or any desired background
+      tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+    
       // Draw the pixels manually
       for (let y = 0; y < SPRITE_SIZE; y++) {
         for (let x = 0; x < SPRITE_SIZE; x++) {
@@ -413,6 +415,7 @@ function handleDown(e) {
       }
       gif.addFrame(tempCtx, {copy: true, delay: 1000 / fps});
     });
+
   
     gif.on('finished', (blob) => {
       const url = URL.createObjectURL(blob);
