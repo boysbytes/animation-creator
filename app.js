@@ -50,6 +50,11 @@ function SpriteEditor() {
   const [savedProjects, setSavedProjects] = useState([]);
   const [previewScale, setPreviewScale] = useState(3);
 
+  // -- Onion Skin ---
+  const [showOnion, setShowOnion] = useState(true); // Onion skin toggle
+  const onionAlpha = 0.35; // Opacity for onion skin frames
+
+
   // --- Canvas Ref ---
   const canvasRef = useRef();
 
@@ -95,38 +100,68 @@ function SpriteEditor() {
   }, [frames.length, tool]);
 
   // --- Draw on canvas (helper) ---
-  function drawCanvas() {
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, DISPLAY_SIZE, DISPLAY_SIZE);
-    ctx.imageSmoothingEnabled = false;
+function drawCanvas() {
+  const canvas = canvasRef.current;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, DISPLAY_SIZE, DISPLAY_SIZE);
+  ctx.imageSmoothingEnabled = false;
+  const pxSize = DISPLAY_SIZE / SPRITE_SIZE;
 
-    // --- Draw sprite pixels ---
-    const pxSize = DISPLAY_SIZE / SPRITE_SIZE;
-    const frame = frames[currentFrame];
-    for (let y = 0; y < SPRITE_SIZE; y++) {
-      for (let x = 0; x < SPRITE_SIZE; x++) {
-        const color = frame[getIndex(x, y)] || '#00000000';
-        if (color.length === 9 && color.endsWith('00')) continue; // skip transparent
-        ctx.fillStyle = color;
+  // === Onion skin: Draw previous/next frame under current ===
+  if (showOnion && frames.length > 1) {
+    // Previous frame (red tint, left side of timeline)
+    if (currentFrame > 0) {
+      ctx.globalAlpha = onionAlpha;
+      drawFrame(ctx, frames[currentFrame - 1], '#ff3333');
+    }
+    // Next frame (blue tint, right side of timeline)
+    if (currentFrame < frames.length - 1) {
+      ctx.globalAlpha = onionAlpha;
+      drawFrame(ctx, frames[currentFrame + 1], '#3385ff');
+    }
+    ctx.globalAlpha = 1.0;
+  }
+
+  // --- Draw current frame pixels (full opacity, no tint) ---
+  drawFrame(ctx, frames[currentFrame]);
+  
+  // --- Draw grid ---
+  ctx.strokeStyle = '#bbb';
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= SPRITE_SIZE; i++) {
+    ctx.beginPath();
+    ctx.moveTo(i * pxSize, 0);
+    ctx.lineTo(i * pxSize, DISPLAY_SIZE);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, i * pxSize);
+    ctx.lineTo(DISPLAY_SIZE, i * pxSize);
+    ctx.stroke();
+  }
+}
+
+// Helper: Draw a frame with optional tint
+function drawFrame(ctx, frame, tintColor) {
+  const pxSize = DISPLAY_SIZE / SPRITE_SIZE;
+  for (let y = 0; y < SPRITE_SIZE; y++) {
+    for (let x = 0; x < SPRITE_SIZE; x++) {
+      let color = frame[getIndex(x, y)] || '#00000000';
+      // Don't draw transparent pixels
+      if (color.length === 9 && color.endsWith('00')) continue;
+      ctx.fillStyle = color;
+      ctx.fillRect(x * pxSize, y * pxSize, pxSize, pxSize);
+      // Overlay tint for onion skin
+      if (tintColor) {
+        ctx.fillStyle = tintColor;
+        ctx.globalAlpha = 0.15;
         ctx.fillRect(x * pxSize, y * pxSize, pxSize, pxSize);
+        ctx.globalAlpha = onionAlpha;
       }
     }
-
-    // --- Draw grid ---
-    ctx.strokeStyle = '#bbb';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= SPRITE_SIZE; i++) {
-      ctx.beginPath();
-      ctx.moveTo(i * pxSize, 0);
-      ctx.lineTo(i * pxSize, DISPLAY_SIZE);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, i * pxSize);
-      ctx.lineTo(DISPLAY_SIZE, i * pxSize);
-      ctx.stroke();
-    }
   }
+  ctx.globalAlpha = 1.0;
+}
+
 
   // --- Get pixel position from mouse event ---
   function getPixelPos(e) {
@@ -380,6 +415,14 @@ function SpriteEditor() {
               <span className="text-xs">{fps}</span>
             </div>
           </div>
+          <div>
+            <label className="flex items-center gap-2 mt-2 text-sm">
+              <input type="checkbox" checked={showOnion} onChange={e => setShowOnion(e.target.checked)} />
+              Onion Skin
+            </label>
+            <span className="text-xs text-gray-500">Shows prev/next frames faintly</span>
+          </div>
+
           {/* Save/Load/Export */}
           <div className="flex flex-col gap-2 border-t pt-2 mt-2">
             <button className="bg-green-500 text-white rounded p-2 hover:bg-green-600" onClick={() => setShowSaveModal(true)}>💾 Save</button>
