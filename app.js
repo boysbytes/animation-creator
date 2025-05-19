@@ -1,4 +1,6 @@
 const { useState, useRef, useEffect } = React;
+const importInputRef = useRef();
+
 
 // ----- Constants -----
 const SPRITE_SIZE = 32; // Change to 16/64 as desired
@@ -334,6 +336,51 @@ function drawFrame(ctx, frame, tintColor) {
     gif.render();
   }
 
+  // --- Export to File ---
+  function exportToFile() {
+  const data = {
+    name: projectName,
+    frames,
+    palette,
+    fps,
+    date: new Date().toISOString()
+  };
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${projectName || 'sprite'}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// --- Import From File ---
+function importFromFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    try {
+      const data = JSON.parse(event.target.result);
+      if (!data.frames || !data.palette) throw new Error('Invalid file');
+      setFrames(data.frames);
+      setPalette(data.palette);
+      setProjectName(data.name || 'Imported Sprite');
+      setFps(data.fps || 8);
+      setCurrentFrame(0);
+      alert('Project imported!');
+    } catch (err) {
+      alert('Error importing file: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+
   // --- Render frame as data URL (for export and preview) ---
   function renderFrameToDataURL(frame, scale = 1) {
     const s = SPRITE_SIZE * scale;
@@ -437,6 +484,20 @@ function drawFrame(ctx, frame, tintColor) {
             <button className="bg-green-500 text-white rounded p-2 hover:bg-green-600" onClick={() => setShowSaveModal(true)}>💾 Save</button>
             <button className="bg-blue-500 text-white rounded p-2 hover:bg-blue-600" onClick={() => setShowLoadModal(true)}>📂 Load</button>
             <button className="bg-pink-500 text-white rounded p-2 hover:bg-pink-600" onClick={exportGif}>🎞️ Export GIF</button>
+            <button className="bg-purple-500 text-white rounded p-2 hover:bg-purple-600" onClick={exportToFile}>⬇️ Export File</button>
+            <input
+              type="file"
+              accept=".json"
+              style={{ display: 'none' }}
+              ref={importInputRef}
+              onChange={importFromFile}
+            />
+            <button
+              className="bg-indigo-500 text-white rounded p-2 hover:bg-indigo-600"
+              onClick={() => importInputRef.current.click()}
+            >
+              ⬆️ Import File
+            </button>
           </div>
         </div>
         {/* Main Canvas Area */}
