@@ -1,6 +1,4 @@
 const { useState, useRef, useEffect } = React;
-const importInputRef = useRef();
-
 
 // ----- Constants -----
 const SPRITE_SIZE = 32; // Change to 16/64 as desired
@@ -33,6 +31,7 @@ function Modal({ title, onClose, children }) {
 
 // ----- Main Sprite Editor -----
 function SpriteEditor() {
+  const ImportInputRef = useRef();
   // --- Animation/Frame State ---
   const [frames, setFrames] = useState([blankFrame()]);
   const [currentFrame, setCurrentFrame] = useState(0);
