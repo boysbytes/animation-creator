@@ -497,7 +497,7 @@ function importFromFile(e) {
   return (
     <div className="flex flex-col min-h-screen bg-gray-100">
       <h1 className="text-xl sm:text-2xl font-bold mb-2 sm:mb-4 text-center">
-        Pixel Art Sprite Editor
+        Pixsel: Sprite Editor and Animator
       </h1>
       <div className="flex flex-col md:flex-row flex-1 gap-3 sm:gap-4 px-2 pb-4">
         {/* Tools */}
