@@ -391,7 +391,7 @@ function handleDown(e) {
       workerScript: 'gif.worker.js'
     });
   
-    // Create a temporary canvas to draw each frame
+    // Create a temp canvas to render each frame
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = SPRITE_SIZE * scale;
     tempCanvas.height = SPRITE_SIZE * scale;
@@ -399,16 +399,19 @@ function handleDown(e) {
     tempCtx.imageSmoothingEnabled = false;
   
     frames.forEach(frame => {
+      // Clear the canvas first!
       tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+  
+      // Draw the pixels manually
       for (let y = 0; y < SPRITE_SIZE; y++) {
         for (let x = 0; x < SPRITE_SIZE; x++) {
-          const color = frame[getIndex(x, y)] || '#00000000';
-          if (color.length === 9 && color.endsWith('00')) continue; // skip transparent
+          let color = frame[getIndex(x, y)] || '#00000000';
+          if (color.length === 9 && color.endsWith('00')) continue; // transparent
           tempCtx.fillStyle = color;
           tempCtx.fillRect(x * scale, y * scale, scale, scale);
         }
       }
-      gif.addFrame(tempCtx, { copy: true, delay: 1000 / fps });
+      gif.addFrame(tempCtx, {copy: true, delay: 1000 / fps});
     });
   
     gif.on('finished', (blob) => {
@@ -423,6 +426,7 @@ function handleDown(e) {
     });
     gif.render();
   }
+
 
 
   // --- Export to File ---
