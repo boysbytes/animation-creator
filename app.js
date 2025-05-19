@@ -167,10 +167,19 @@ function drawFrame(ctx, frame, tintColor) {
   function getPixelPos(e) {
     const rect = canvasRef.current.getBoundingClientRect();
     const scale = SPRITE_SIZE / rect.width;
-    const x = Math.floor((e.touches ? e.touches[0].clientX : e.clientX - rect.left) * scale);
-    const y = Math.floor((e.touches ? e.touches[0].clientY : e.clientY - rect.top) * scale);
+    let clientX, clientY;
+    if (e.touches && e.touches.length) {
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+    const x = Math.floor((clientX - rect.left) * scale);
+    const y = Math.floor((clientY - rect.top) * scale);
     return [x, y];
   }
+
 
   // --- Draw a pixel ---
   function setPixel(x, y, color) {
