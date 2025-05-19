@@ -31,7 +31,7 @@ function Modal({ title, onClose, children }) {
 
 // ----- Main Sprite Editor -----
 function SpriteEditor() {
-  const ImportInputRef = useRef();
+  const importInputRef = useRef();
   // --- Animation/Frame State ---
   const [frames, setFrames] = useState([blankFrame()]);
   const [currentFrame, setCurrentFrame] = useState(0);
