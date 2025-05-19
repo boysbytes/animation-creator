@@ -1,911 +1,489 @@
 const { useState, useRef, useEffect } = React;
 
-// --- Simple Modal ---
-function SimpleModal({ title, onClose, children }) {
-  return (
-    React.createElement('div', { className: "fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30" },
-      React.createElement('div', { className: "bg-white rounded-lg shadow-lg p-4 min-w-[300px] max-w-[90vw]" },
-        React.createElement('div', { className: "flex justify-between items-center mb-2" },
-          React.createElement('div', { className: "font-bold" }, title),
-          React.createElement('button', {
-            onClick: onClose,
-            className: "ml-2 px-2 py-1 text-gray-500 hover:text-black"
-          }, '✕')
-        ),
-        children
-      )
-    )
-  );
-}
-
-
-// --- Helper functions for flood fill ---
-function hexToRgba(hex) {
-  if (!hex) return { r: 0, g: 0, b: 0, a: 255 };
-  const shorthandRegex = /^#?([a-f\d])([a-f\d])([a-f\d])$/i;
-  hex = hex.replace(shorthandRegex, (m, r, g, b) => r + r + g + g + b + b);
-  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  return result ? {
-    r: parseInt(result[1], 16),
-    g: parseInt(result[2], 16),
-    b: parseInt(result[3], 16),
-    a: 255
-  } : { r: 0, g: 0, b: 0, a: 255 };
-}
-
-
-function getPixelColor(imageData, x, y) {
-  if (x < 0 || y < 0 || x >= imageData.width || y >= imageData.height) {
-    return { r: -1, g: -1, b: -1, a: -1 }; // Indicate out of bounds
-  }
-  const offset = (Math.floor(y) * imageData.width + Math.floor(x)) * 4;
-  return {
-    r: imageData.data[offset],
-    g: imageData.data[offset + 1],
-    b: imageData.data[offset + 2],
-    a: imageData.data[offset + 3]
-  };
-}
-
-
-function setPixelColor(imageData, x, y, color) {
-  const offset = (Math.floor(y) * imageData.width + Math.floor(x)) * 4;
-  imageData.data[offset] = color.r;
-  imageData.data[offset + 1] = color.g;
-  imageData.data[offset + 2] = color.b;
-  imageData.data[offset + 3] = color.a;
-}
-
-
-function colorsMatch(c1, c2) {
-  return c1.r === c2.r && c1.g === c2.g && c1.b === c2.b && c1.a === c2.a;
-}
-
-// Helper function to generate SVG string from Lucide icon data array
-function generateSvgString(iconData) {
-  if (!Array.isArray(iconData)) {
-    console.error("Invalid icon data format:", iconData);
-    return ''; // Return empty string for invalid data
-  }
-
-  let svgContent = '';
-
-  iconData.forEach(elementData => {
-    if (!Array.isArray(elementData) || elementData.length !== 2) {
-      console.warn("Unexpected element data format:", elementData);
-      return; // Skip malformed element data
-    }
-
-    const elementType = elementData[0]; // e.g., 'path', 'circle'
-    const attributes = elementData[1]; // e.g., { d: '...', stroke: '...' }
-
-    let attributeString = '';
-    for (const attrName in attributes) {
-      // Use hasOwnProperty to ensure we only get object's own properties
-      if (Object.prototype.hasOwnProperty.call(attributes, attrName)) {
-        // Basic attribute serialization
-        attributeString += ` ${attrName}="${attributes[attrName]}"`;
-      }
-    }
-
-    // Construct the element tag. Assuming common SVG icon elements.
-    svgContent += `<${elementType}${attributeString}></${elementType}>`;
-  });
-
-  // Wrap the content in an SVG tag with standard Lucide attributes
-  const svgAttributes = 'xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
-
-  return `<svg ${svgAttributes}>${svgContent}</svg>`;
-}
-
-
-function AnimationCreator() {
-  // ==== State ====
-  const [frames, setFrames] = useState([{ id: Date.now(), data: null }]);
-  const [currentFrame, setCurrentFrame] = useState(0);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [tool, setTool] = useState('pen');
-  const [color, setColor] = useState('#000000');
-  const [lineWidth, setLineWidth] = useState(5);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [fps, setFps] = useState(12);
-  const [moveStartPos, setMoveStartPos] = useState({ x: 0, y: 0 });
-  const [selectedArea, setSelectedArea] = useState(null);
-  const [projectName, setProjectName] = useState('My Animation');
-  const [isMobileView, setIsMobileView] = useState(false); // State seems unused in provided UI, but kept
-  const [showSaveModal, setShowSaveModal] = useState(false);
-  const [savedProjects, setSavedProjects] = useState([]);
-  const [showLoadModal, setShowLoadModal] = useState(false);
-
-  const canvasRef = useRef(null);
-  const canvasWrapperRef = useRef(null);
-  const [canvasSize, setCanvasSize] = useState({ width: 600, height: 400 }); // Initial size
-
-  // ==== Responsive breakpoints ====
-  useEffect(() => {
-    const checkMobileView = () => setIsMobileView(window.innerWidth < 1024);
-    checkMobileView();
-    window.addEventListener('resize', checkMobileView);
-    return () => window.removeEventListener('resize', checkMobileView);
-  }, []);
-
-  // ==== Responsive Canvas ====
-  useEffect(() => {
-    const updateCanvasDimensions = () => {
-      if (canvasWrapperRef.current) {
-        const rect = canvasWrapperRef.current.getBoundingClientRect();
-        let newWidth = rect.width;
-        // Maintain 3:2 aspect ratio (common for canvas/animation)
-        let newHeight = Math.floor(newWidth * (2 / 3));
-        // Ensure canvas fits within wrapper height if needed
-        if (newHeight > rect.height) {
-          newHeight = rect.height;
-          newWidth = Math.floor(newHeight * (3 / 2));
-        }
-
-        // Set minimum dimensions
-        newWidth = Math.max(150, newWidth);
-        newHeight = Math.max(100, newHeight);
-
-        // Set a maximum drawing resolution, independent of display size
-        const maxDrawingWidth = 800; // Maximum pixel width for drawing
-
-        // Calculate the target drawing dimensions based on the display size, capped by maxDrawingWidth
-        let targetDrawingWidth = Math.min(maxDrawingWidth, Math.floor(newWidth));
-        let targetDrawingHeight = Math.floor(targetDrawingWidth * (2/3)); // Maintain aspect ratio for drawing
-
-        // Ensure drawing height doesn't exceed calculated display height (could happen if display is very tall and narrow)
-        targetDrawingHeight = Math.min(targetDrawingHeight, Math.floor(newHeight));
-        targetDrawingWidth = Math.floor(targetDrawingHeight * (3/2)); // Adjust width based on height cap
-
-
-        if (canvasSize.width !== targetDrawingWidth || canvasSize.height !== targetDrawingHeight) {
-          setCanvasSize({ width: targetDrawingWidth, height: targetDrawingHeight });
-        }
-      }
-    };
-
-    updateCanvasDimensions(); // Call on mount
-
-    let resizeObserver;
-    if (canvasWrapperRef.current) {
-      resizeObserver = new window.ResizeObserver(updateCanvasDimensions);
-      resizeObserver.observe(canvasWrapperRef.current);
-    }
-
-    return () => {
-      if (resizeObserver && canvasWrapperRef.current) {
-        resizeObserver.unobserve(canvasWrapperRef.current);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canvasSize.width, canvasSize.height]); // Re-run when canvasSize changes, to potentially cap it
-
-
-  // ==== Draw Frame ====
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    // Ensure canvas element dimensions match state
-    if (canvas.width !== canvasSize.width || canvas.height !== canvasSize.height) {
-      canvas.width = canvasSize.width;
-      canvas.height = canvasSize.height;
-    }
-
-    const ctx = canvas.getContext('2d');
-    // Clear canvas
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // Draw the current frame data
-    if (frames[currentFrame] && frames[currentFrame].data) {
-      const img = new window.Image();
-      img.onload = () => {
-          // Clear again before drawing image to ensure no artifacts
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      };
-      img.onerror = () => {
-          console.error("Failed to load frame image:", frames[currentFrame].data);
-      };
-      img.src = frames[currentFrame].data;
-    }
-  }, [currentFrame, frames, canvasSize]); // Depend on currentFrame, frames, and canvasSize
-
-  // ==== Animation playback ====
-  useEffect(() => {
-    if (!isPlaying || frames.length === 0) return;
-    const intervalId = setInterval(() => {
-      setCurrentFrame(prev => (prev + 1) % frames.length);
-    }, 1000 / fps);
-    return () => clearInterval(intervalId);
-  }, [isPlaying, fps, frames.length]); // Depend on isPlaying, fps, and frames.length
-
-  // ==== Load saved projects on mount ====
-  useEffect(() => {
-    try {
-      const savedProjectsStr = localStorage.getItem('animationDrawProjects');
-      if (savedProjectsStr) setSavedProjects(JSON.parse(savedProjectsStr));
-    } catch (error) {
-        console.error("Failed to load projects from localStorage:", error);
-    }
-  }, []); // Run only on mount
-
-  // ==== Canvas helpers ====
-  const getCanvasCoordinates = (eventClientX, eventClientY) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    // Calculate scale factor based on *display* size vs *drawing* size
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    return {
-      x: (eventClientX - rect.left) * scaleX,
-      y: (eventClientY - rect.top) * scaleY,
-    };
-  };
-
-  // ==== Touch events ====
-  const handleTouchStart = (e) => {
-    if (e.touches.length > 1) return; // Ignore multi-touch
-    e.preventDefault(); // Prevent scrolling
-    const touch = e.touches[0];
-    const { x, y } = getCanvasCoordinates(touch.clientX, touch.clientY);
-    setIsDrawing(true);
-    handleDrawStart(x, y);
-  };
-
-  const handleTouchMove = (e) => {
-    if (!isDrawing || e.touches.length > 1) return;
-    e.preventDefault(); // Prevent scrolling
-    const touch = e.touches[0];
-    const { x, y } = getCanvasCoordinates(touch.clientX, touch.clientY);
-    handleDrawMove(x, y);
-  };
-
-  const handleTouchEnd = () => {
-    if (isDrawing) {
-      setIsDrawing(false);
-      handleDrawEnd();
-    }
-  };
-
-  // ==== Drawing Logic ====
-  const handleDrawStart = (x, y) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-
-    if (tool === 'pen' || tool === 'eraser') {
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.strokeStyle = tool === 'pen' ? color : '#ffffff'; // Eraser draws with white
-      ctx.lineWidth = lineWidth;
-    } else if (tool === 'fill') {
-      // Ensure coordinates are integers for pixel operations
-      floodFill(canvas, Math.round(x), Math.round(y), color);
-      // Flood fill is a single action, save frame immediately
-      handleDrawEnd();
-    } else if (tool === 'move') {
-      setMoveStartPos({ x, y });
-      // Capture current canvas state before moving
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = canvas.width;
-      tempCanvas.height = canvas.height;
-      const tempCtx = tempCanvas.getContext('2d');
-      tempCtx.drawImage(canvas, 0, 0);
-      setSelectedArea(tempCanvas);
-    }
-  };
-
-  const handleDrawMove = (x, y) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-
-    if ((tool === 'pen' || tool === 'eraser') && isDrawing) {
-      ctx.lineTo(x, y);
-      ctx.stroke();
-    } else if (tool === 'move' && selectedArea && isDrawing) {
-      // Redraw background and captured area as the "move" happens
-      ctx.fillStyle = '#ffffff'; // Clear with background color
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      const offsetX = x - moveStartPos.x;
-      const offsetY = y - moveStartPos.y;
-      ctx.drawImage(selectedArea, offsetX, offsetY);
-    }
-  };
-
-  const handleDrawEnd = () => {
-    // For pen, eraser, and move, save the frame data after drawing ends
-    if (tool === 'pen' || tool === 'eraser' || tool === 'move') {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const newFrames = [...frames];
-      if (newFrames[currentFrame]) {
-        newFrames[currentFrame].data = canvas.toDataURL();
-        setFrames(newFrames);
-      }
-    }
-    // Clear the selected area temporary canvas after move ends
-    if (tool === 'move') setSelectedArea(null);
-  };
-
-  // ==== Mouse events ====
-  const handleMouseDown = (e) => {
-    if (e.button !== 0) return; // Only left mouse button
-    setIsDrawing(true);
-    const { x, y } = getCanvasCoordinates(e.clientX, e.clientY);
-    handleDrawStart(x, y);
-  };
-
-  const handleMouseMove = (e) => {
-    if (!isDrawing) return;
-    const { x, y } = getCanvasCoordinates(e.clientX, e.clientY);
-    handleDrawMove(x, y);
-  };
-
-  const handleMouseUp = () => {
-    if (isDrawing) {
-      setIsDrawing(false);
-      handleDrawEnd();
-    }
-  };
-
-  const handleMouseLeave = () => {
-    // End drawing if mouse leaves canvas area while drawing
-    if (isDrawing) {
-      setIsDrawing(false);
-      handleDrawEnd();
-    }
-  };
-
-  // ==== Project Save/Load/Delete ====
-  const saveProject = () => {
-    if (!projectName.trim()) {
-      alert("Please enter a project name.");
-      return;
-    }
-    try {
-      const projectData = {
-        id: Date.now().toString(), // Unique ID
-        name: projectName,
-        frames: frames,
-        date: new Date().toISOString(),
-        thumbnail: frames[0]?.data || null // Use first frame as thumbnail
-      };
-
-      const currentSavedProjects = JSON.parse(localStorage.getItem('animationDrawProjects') || '[]');
-
-      // Update if ID exists, otherwise add as new.
-      let updatedProjects;
-      const existingProjectIndex = currentSavedProjects.findIndex(p => p.name === projectName); // Check by name for simplicity
-
-      if (existingProjectIndex > -1) {
-          // Update existing project (replace it)
-          updatedProjects = [...currentSavedProjects];
-          updatedProjects[existingProjectIndex] = projectData;
-      } else {
-          // Add new project to the beginning
-          updatedProjects = [projectData, ...currentSavedProjects];
-           // Limit the number of saved projects
-           if (updatedProjects.length > 20) { // Keep a max of 20 projects
-               updatedProjects = updatedProjects.slice(0, 20);
-           }
-      }
-
-      localStorage.setItem('animationDrawProjects', JSON.stringify(updatedProjects));
-      setSavedProjects(updatedProjects); // Update state to reflect saved projects
-      setShowSaveModal(false);
-      alert(`Project "${projectName}" saved successfully!`);
-    } catch (error) {
-      if (error.name === 'QuotaExceededError') {
-        alert('Failed to save project: Storage quota exceeded. Please free up some space or manage existing projects.');
-      } else {
-        alert('Failed to save project. Please try again.');
-        console.error("Save project error:", error);
-      }
-    }
-  };
-
-  const loadProject = (projectToLoad) => {
-    // Consider clearing current canvas or confirming with user before loading
-    setFrames(projectToLoad.frames);
-    setCurrentFrame(0); // Start at the first frame
-    setProjectName(projectToLoad.name);
-    setFps(projectToLoad.fps || 12); // Load FPS, default to 12 if not saved
-    setShowLoadModal(false);
-    alert(`Project "${projectToLoad.name}" loaded.`);
-  };
-
-  const deleteSavedProject = (projectId) => {
-    if (window.confirm("Are you sure you want to delete this project?")) {
-      try {
-        const updatedProjects = savedProjects.filter(project => project.id !== projectId);
-        localStorage.setItem('animationDrawProjects', JSON.stringify(updatedProjects));
-        setSavedProjects(updatedProjects);
-        alert('Project deleted.');
-      } catch (error) {
-        alert('Failed to delete project.');
-        console.error("Delete project error:", error);
-      }
-    }
-  };
-
-  // ==== Frame Operations ====
-  const addFrame = () => {
-    const newFrame = { id: Date.now(), data: null }; // New frame is initially blank
-    const newFrames = [...frames];
-    newFrames.splice(currentFrame + 1, 0, newFrame); // Insert after current frame
-    setFrames(newFrames);
-    setCurrentFrame(currentFrame + 1); // Move to the new frame
-  };
-
-  const deleteFrame = () => {
-    if (frames.length <= 1) {
-      alert("Cannot delete the last frame.");
-      return;
-    }
-    const newFrames = frames.filter((_, index) => index !== currentFrame);
-    setFrames(newFrames);
-    // Adjust current frame index if the last frame was deleted
-    setCurrentFrame(prev => Math.max(0, Math.min(prev, newFrames.length - 1)));
-  };
-
-  const duplicateFrame = () => {
-    if (!frames[currentFrame]) return;
-    // Create a new frame with the data of the current frame
-    const newFrame = { id: Date.now(), data: frames[currentFrame].data };
-    const newFrames = [...frames];
-    newFrames.splice(currentFrame + 1, 0, newFrame); // Insert duplicated frame after current
-    setFrames(newFrames);
-    setCurrentFrame(currentFrame + 1); // Move to the duplicated frame
-  };
-
-  const togglePlay = () => setIsPlaying(!isPlaying);
-
-  // ==== Export GIF ====
-  const exportGif = () => {
-    if (typeof window.GIF === 'undefined') {
-      alert('Error: GIF export library is missing. Please ensure GIF.js is included in your project.');
-      return;
-    }
-    try {
-      const gif = new window.GIF({
-        workers: 2, // Number of web workers to use
-        quality: 10, // Lower is better quality (higher number of colors)
-        width: canvasSize.width,
-        height: canvasSize.height,
-        // Specify the path to the worker script relative to the HTML page
-        workerScript: 'gif.worker.js'
-      });
-
-      frames.forEach(frame => {
-        if (frame.data) {
-          const img = document.createElement('img');
-          img.src = frame.data;
-          gif.addFrame(img, { delay: 1000 / fps, copy: true }); // Use delay based on FPS
-        } else {
-          // Add a blank frame if frame data is null
-          const emptyCanvas = document.createElement('canvas');
-          emptyCanvas.width = canvasSize.width;
-          emptyCanvas.height = canvasSize.height;
-          const ctx = emptyCanvas.getContext('2d');
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, canvasSize.width, canvasSize.height);
-          gif.addFrame(emptyCanvas, { delay: 1000 / fps, copy: true });
-        }
-      });
-
-      gif.on('finished', blob => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${projectName || 'animation'}.gif`; // Default filename
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url); // Clean up
-      });
-
-      gif.on('progress', progress => {
-         console.log(`GIF rendering progress: ${Math.round(progress * 100)}%`);
-         // Could update a UI element here
-      });
-
-      gif.on('error', error => {
-          console.error("GIF rendering error:", error);
-          alert('Failed to export GIF during rendering.');
-      });
-
-
-      gif.render(); // Start the rendering process
-
-    } catch (error) {
-      alert('Failed to initialize GIF export. Please try again.');
-      console.error("GIF export initialization error:", error);
-    }
-  };
-
-  // ==== Export Video (WebM) ====
-const exportVideo = () => {
-  if (typeof window.MediaRecorder === 'undefined') {
-    alert('Video recording is not supported in your browser.');
-    return;
-  }
-
-  // Set up video canvas
-  const videoCanvas = document.createElement('canvas');
-  videoCanvas.width = canvasSize.width;
-  videoCanvas.height = canvasSize.height;
-  const ctx = videoCanvas.getContext('2d');
-
-  // Prepare to record from the canvas at the desired frame rate
-  const stream = videoCanvas.captureStream(fps);
-  let recorder;
-  try {
-    recorder = new window.MediaRecorder(stream, { mimeType: 'video/webm' });
-  } catch (e) {
-    alert('Failed to start video recorder. Please try a different browser.');
-    return;
-  }
-
-  const chunks = [];
-  recorder.ondataavailable = e => {
-    if (e.data.size > 0) {
-      chunks.push(e.data);
-    }
-  };
-
-  recorder.onstop = () => {
-    const blob = new Blob(chunks, { type: 'video/webm' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${projectName || 'animation'}.webm`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    console.log('Video export finished.');
-  };
-
-  recorder.onerror = (event) => {
-    console.error("MediaRecorder error:", event.error);
-    alert("Error occurred during video recording.");
-  };
-
-  let currentFrameIndex = 0;
-  const frameInterval = 1000 / fps;
-
-  function drawAndAdvance() {
-    if (currentFrameIndex >= frames.length) {
-      recorder.stop();
-      return;
-    }
-
-    const frame = frames[currentFrameIndex];
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, videoCanvas.width, videoCanvas.height);
-
-    if (frame.data) {
-      const img = new window.Image();
-      img.onload = () => {
-        ctx.drawImage(img, 0, 0, videoCanvas.width, videoCanvas.height);
-        setTimeout(() => {
-          currentFrameIndex++;
-          drawAndAdvance();
-        }, frameInterval);
-      };
-      img.onerror = () => {
-        // Skip this frame but maintain timing
-        setTimeout(() => {
-          currentFrameIndex++;
-          drawAndAdvance();
-        }, frameInterval);
-      };
-      img.src = frame.data;
-    } else {
-      // Blank frame, maintain timing
-      setTimeout(() => {
-        currentFrameIndex++;
-        drawAndAdvance();
-      }, frameInterval);
-    }
-  }
-
-  // Draw first frame, then start recorder just before advancing frames
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, videoCanvas.width, videoCanvas.height);
-
-  if (frames[0] && frames[0].data) {
-    const img = new window.Image();
-    img.onload = () => {
-      ctx.drawImage(img, 0, 0, videoCanvas.width, videoCanvas.height);
-      recorder.start();
-      setTimeout(() => {
-        currentFrameIndex = 1;
-        drawAndAdvance();
-      }, frameInterval);
-    };
-    img.onerror = () => {
-      recorder.start();
-      setTimeout(() => {
-        currentFrameIndex = 1;
-        drawAndAdvance();
-      }, frameInterval);
-    };
-    img.src = frames[0].data;
-  } else {
-    recorder.start();
-    setTimeout(() => {
-      currentFrameIndex = 1;
-      drawAndAdvance();
-    }, frameInterval);
-  }
-};
-
-
-  // ==== Flood fill implementation ====
-  function floodFill(canvas, startX, startY, newColorHex) {
-    const ctx = canvas.getContext('2d');
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const targetColor = getPixelColor(imageData, startX, startY);
-    const fillColor = hexToRgba(newColorHex);
-
-    // If start pixel is out of bounds or target color matches fill color, do nothing
-    if (targetColor.a === -1 || colorsMatch(targetColor, fillColor)) {
-      return;
-    }
-
-    const queue = [[startX, startY]];
-    const visited = new Set(); // Use a Set to track visited pixels efficiently
-    const getKey = (x, y) => `${x},${y}`; // Helper to create a unique key for visited set
-
-    while (queue.length > 0) {
-      const [px, py] = queue.shift(); // Get the next pixel from the front of the queue
-
-      // Check bounds and if already visited
-      if (px < 0 || px >= canvas.width || py < 0 || py >= canvas.height || visited.has(getKey(px, py))) {
-        continue;
-      }
-
-      const pixelColor = getPixelColor(imageData, px, py);
-
-      // If the pixel's color matches the target color
-      if (colorsMatch(pixelColor, targetColor)) {
-        setPixelColor(imageData, px, py, fillColor); // Set the pixel to the fill color
-        visited.add(getKey(px, py)); // Mark as visited
-
-        // Add neighboring pixels to the queue
-        queue.push([px + 1, py]);
-        queue.push([px - 1, py]);
-        queue.push([px, py + 1]);
-        queue.push([px, py - 1]);
-      }
-    }
-
-    // Put the modified image data back onto the canvas
-    ctx.putImageData(imageData, 0, 0);
-  }
-
-
-// ==== UI ====
+// ----- Constants -----
+const SPRITE_SIZE = 32; // Change to 16/64 as desired
+const DISPLAY_SIZE = 512; // Canvas shown at this size (for editing)
+const DEFAULT_COLORS = [
+  '#000000', '#7f7f7f', '#ffffff',
+  '#c62828', '#ffb300', '#ffeb3b',
+  '#388e3c', '#0288d1', '#6a1b9a'
+];
+
+// ----- Utils -----
+const blankFrame = () => Array(SPRITE_SIZE * SPRITE_SIZE).fill('#00000000'); // Transparent by default
+const getIndex = (x, y) => y * SPRITE_SIZE + x;
+const copyFrame = (frame) => [...frame];
+
+// ----- Modal Component -----
+function Modal({ title, onClose, children }) {
   return (
-    <div className="flex flex-col h-dvh p-2 sm:p-4 bg-gray-100 font-sans text-gray-800">
-      <h1 className="text-xl sm:text-2xl font-bold mb-2 sm:mb-4 text-center">
-        Frame Animation Creator
-      </h1>
-      {/* Workspace */}
-      <div className="flex flex-col lg:flex-row flex-1 gap-3 sm:gap-4 overflow-hidden">
-        {/* Toolbar */}
-        <div className="w-full lg:w-56 flex flex-col gap-4 p-3 bg-white rounded-lg shadow-md order-2 lg:order-1 overflow-y-auto">
-          {/* Project Name */}
-          <div>
-            <label htmlFor="projectName" className="font-semibold text-sm">Project Name</label>
-            <input
-              type="text"
-              id="projectName"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
-              className="w-full p-2 border border-gray-300 rounded mt-1 text-sm"
-              placeholder="My Animation"
-            />
-          </div>
-          {/* Tools */}
-          <div className="flex flex-col gap-2">
-            <h2 className="font-semibold text-sm border-b pb-1 mb-1">Tools</h2>
-            {['pen', 'eraser', 'fill', 'move'].map(toolName => (
-              <button
-                key={toolName}
-                className={`p-2 rounded text-sm capitalize ${tool === toolName ? 'bg-blue-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
-                onClick={() => setTool(toolName)}
-              >
-                {toolName}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-col gap-1">
-            <h2 className="font-semibold text-sm">Color</h2>
-            <input
-              type="color"
-              value={color}
-              onChange={(e) => setColor(e.target.value)}
-              className="w-full h-10 rounded border border-gray-300"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <h2 className="font-semibold text-sm">Line Width: <span className="font-normal">{lineWidth}px</span></h2>
-            <input
-              type="range" min="1" max="50" value={lineWidth}
-              onChange={(e) => setLineWidth(parseInt(e.target.value))}
-              className="w-full"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <h2 className="font-semibold text-sm">FPS: <span className="font-normal">{fps}</span></h2>
-            <input
-              type="range" min="1" max="30" value={fps}
-              onChange={(e) => setFps(parseInt(e.target.value))}
-              className="w-full"
-            />
-          </div>
-          {/* Save/Load/Export */}
-          <div className="flex flex-col gap-2 mt-auto border-t pt-2">
-            <h2 className="font-semibold text-sm mb-1">Project</h2>
-            <button
-              onClick={() => setShowSaveModal(true)}
-              className="flex items-center justify-center gap-2 p-2 bg-green-500 text-white rounded hover:bg-green-600 text-sm"
-              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Save']) + " Save"}}
-            />
-            <button
-              onClick={() => setShowLoadModal(true)}
-              className="flex items-center justify-center gap-2 p-2 bg-blue-500 text-white rounded hover:bg-blue-600 text-sm"
-              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Upload']) + " Load"}}
-            />
-            <button
-              onClick={exportGif}
-              className="flex items-center justify-center gap-2 p-2 bg-pink-500 text-white rounded hover:bg-pink-600 text-sm"
-              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Download']) + " Export GIF"}}
-            />
-            <button
-              onClick={exportVideo}
-              className="flex items-center justify-center gap-2 p-2 bg-yellow-500 text-white rounded hover:bg-yellow-600 text-sm"
-              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Download']) + " Export Video"}}
-            />
-          </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
+      <div className="bg-white rounded-lg shadow-lg p-4 min-w-[300px] max-w-[95vw]">
+        <div className="flex justify-between items-center mb-2">
+          <span className="font-bold">{title}</span>
+          <button onClick={onClose} className="ml-2 px-2 py-1 text-gray-500 hover:text-black">✕</button>
         </div>
-        {/* Canvas area (SINGLE instance) */}
-        <div
-          ref={canvasWrapperRef}
-          className="
-            flex-1 flex flex-col items-center justify-center
-            bg-white rounded-lg shadow-md p-2
-            relative overflow-auto order-1 lg:order-2
-            max-h-[80vh] max-w-full
-          "
-          style={{ minWidth: 0 }}
-        >
-          <canvas
-            ref={canvasRef}
-            width={canvasSize.width}
-            height={canvasSize.height}
-            style={{
-              width: "100%",
-              maxWidth: "900px",
-              height: "auto",
-              maxHeight: "70vh",
-              border: "1px solid #ccc",
-              background: "#fff",
-              touchAction: "none",
-              display: "block",
-              margin: "0 auto"
-            }}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseLeave}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-          />
-          {/* Frame Controls */}
-          <div className="flex flex-row gap-2 mt-2">
-            <button
-              onClick={() => setCurrentFrame(f => Math.max(0, f - 1))}
-              className="p-2 bg-gray-200 rounded hover:bg-gray-300"
-              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['ChevronRight']).replace('rotate(0 12 12)', 'rotate(180 12 12)')}}
-            />
-            <span className="text-sm font-semibold flex items-center">
-              Frame {currentFrame + 1} / {frames.length}
-            </span>
-            <button
-              onClick={() => setCurrentFrame(f => Math.min(frames.length - 1, f + 1))}
-              className="p-2 bg-gray-200 rounded hover:bg-gray-300"
-              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['ChevronRight'])}}
-            />
-            <button
-              onClick={addFrame}
-              className="p-2 bg-blue-200 rounded hover:bg-blue-300"
-              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Plus'])}}
-            />
-            <button
-              onClick={duplicateFrame}
-              className="p-2 bg-yellow-200 rounded hover:bg-yellow-300"
-              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Copy'])}}
-            />
-            <button
-              onClick={deleteFrame}
-              className="p-2 bg-red-200 rounded hover:bg-red-300"
-              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Trash2'])}}
-            />
-            <button
-              onClick={togglePlay}
-              className={`p-2 rounded ${isPlaying ? 'bg-green-200 hover:bg-green-300' : 'bg-gray-200 hover:bg-gray-300'}`}
-              dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons[isPlaying ? 'Pause' : 'Play'])}}
-            />
-          </div>
-        </div>
+        {children}
       </div>
-      {/* Save Modal */}
-      {showSaveModal && React.createElement(SimpleModal, {
-        title: "Save Project",
-        onClose: () => setShowSaveModal(false)
-      }, (
-        <div className="flex flex-col gap-3">
-          <label className="text-sm font-semibold">
-            Project Name
-            <input
-              type="text"
-              value={projectName}
-              onChange={e => setProjectName(e.target.value)}
-              className="w-full border border-gray-300 rounded px-2 py-1 mt-1"
-            />
-          </label>
-          <button
-            onClick={saveProject}
-            className="bg-green-500 text-white rounded p-2 font-semibold hover:bg-green-600"
-          >
-            Save
-          </button>
-        </div>
-      ))}
-      {/* Load Modal */}
-      {showLoadModal && React.createElement(SimpleModal, {
-        title: "Load Project",
-        onClose: () => setShowLoadModal(false)
-      }, (
-        <div className="flex flex-col gap-3">
-          {savedProjects.length === 0 && (
-            <span className="text-gray-500 text-sm">No saved projects.</span>
-          )}
-          {savedProjects.map(project => (
-            <div key={project.id} className="flex flex-row gap-2 items-center border rounded p-2">
-              {project.thumbnail ? (
-                <img src={project.thumbnail} alt="" className="w-10 h-10 object-cover rounded border" />
-              ) : (
-                <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center text-xs">No Image</div>
-              )}
-              <div className="flex-1">
-                <div className="font-bold text-sm">{project.name}</div>
-                <div className="text-xs text-gray-400">{new Date(project.date).toLocaleString()}</div>
-              </div>
-              <button onClick={() => loadProject(project)} className="p-1 text-green-700 hover:bg-green-100 rounded"
-                dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Check'])}}
-              />
-              <button onClick={() => deleteSavedProject(project.id)} className="p-1 text-red-700 hover:bg-red-100 rounded"
-                dangerouslySetInnerHTML={{__html: generateSvgString(lucide.icons['Trash2'])}}
-              />
-            </div>
-          ))}
-        </div>
-      ))}
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(AnimationCreator));
+// ----- Main Sprite Editor -----
+function SpriteEditor() {
+  // --- Animation/Frame State ---
+  const [frames, setFrames] = useState([blankFrame()]);
+  const [currentFrame, setCurrentFrame] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [fps, setFps] = useState(8);
+
+  // --- Drawing State ---
+  const [currentColor, setCurrentColor] = useState(DEFAULT_COLORS[0]);
+  const [palette, setPalette] = useState(DEFAULT_COLORS);
+  const [tool, setTool] = useState('brush'); // brush | eraser | fill
+  const [mouseDown, setMouseDown] = useState(false);
+
+  // --- UI State ---
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showLoadModal, setShowLoadModal] = useState(false);
+  const [projectName, setProjectName] = useState('My Sprite');
+  const [savedProjects, setSavedProjects] = useState([]);
+  const [previewScale, setPreviewScale] = useState(3);
+
+  // --- Canvas Ref ---
+  const canvasRef = useRef();
+
+  // --- Draw frame to canvas ---
+  useEffect(() => {
+    drawCanvas();
+    // eslint-disable-next-line
+  }, [frames, currentFrame, previewScale]);
+
+  // --- Animation playback ---
+  useEffect(() => {
+    if (!isPlaying) return;
+    const id = setInterval(() => {
+      setCurrentFrame(f => (f + 1) % frames.length);
+    }, 1000 / fps);
+    return () => clearInterval(id);
+  }, [isPlaying, fps, frames.length]);
+
+  // --- Load saved projects on mount ---
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('spriteProjects');
+      if (saved) setSavedProjects(JSON.parse(saved));
+    } catch {}
+  }, []);
+
+  // --- Keyboard shortcuts ---
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.ctrlKey || e.metaKey) return;
+      if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+      if (e.key === 'ArrowRight') setCurrentFrame(f => Math.min(frames.length - 1, f + 1));
+      if (e.key === 'ArrowLeft') setCurrentFrame(f => Math.max(0, f - 1));
+      if (e.key.toLowerCase() === 'b') setTool('brush');
+      if (e.key.toLowerCase() === 'e') setTool('eraser');
+      if (e.key.toLowerCase() === 'f') setTool('fill');
+      if (e.key.toLowerCase() === 'd') duplicateFrame();
+      if (e.key === ' ') { setIsPlaying(p => !p); e.preventDefault(); }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line
+  }, [frames.length, tool]);
+
+  // --- Draw on canvas (helper) ---
+  function drawCanvas() {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, DISPLAY_SIZE, DISPLAY_SIZE);
+    ctx.imageSmoothingEnabled = false;
+
+    // --- Draw sprite pixels ---
+    const pxSize = DISPLAY_SIZE / SPRITE_SIZE;
+    const frame = frames[currentFrame];
+    for (let y = 0; y < SPRITE_SIZE; y++) {
+      for (let x = 0; x < SPRITE_SIZE; x++) {
+        const color = frame[getIndex(x, y)] || '#00000000';
+        if (color.length === 9 && color.endsWith('00')) continue; // skip transparent
+        ctx.fillStyle = color;
+        ctx.fillRect(x * pxSize, y * pxSize, pxSize, pxSize);
+      }
+    }
+
+    // --- Draw grid ---
+    ctx.strokeStyle = '#bbb';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= SPRITE_SIZE; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * pxSize, 0);
+      ctx.lineTo(i * pxSize, DISPLAY_SIZE);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i * pxSize);
+      ctx.lineTo(DISPLAY_SIZE, i * pxSize);
+      ctx.stroke();
+    }
+  }
+
+  // --- Get pixel position from mouse event ---
+  function getPixelPos(e) {
+    const rect = canvasRef.current.getBoundingClientRect();
+    const scale = SPRITE_SIZE / rect.width;
+    const x = Math.floor((e.touches ? e.touches[0].clientX : e.clientX - rect.left) * scale);
+    const y = Math.floor((e.touches ? e.touches[0].clientY : e.clientY - rect.top) * scale);
+    return [x, y];
+  }
+
+  // --- Draw a pixel ---
+  function setPixel(x, y, color) {
+    if (x < 0 || x >= SPRITE_SIZE || y < 0 || y >= SPRITE_SIZE) return;
+    setFrames(prev => {
+      const newFrames = [...prev];
+      const newFrame = [...newFrames[currentFrame]];
+      newFrame[getIndex(x, y)] = color;
+      newFrames[currentFrame] = newFrame;
+      return newFrames;
+    });
+  }
+
+  // --- Mouse/touch drawing handlers ---
+  function handleDraw(e) {
+    if (!mouseDown) return;
+    const [x, y] = getPixelPos(e);
+    if (tool === 'brush') setPixel(x, y, currentColor);
+    if (tool === 'eraser') setPixel(x, y, '#00000000');
+    if (tool === 'fill') fill(x, y, frames[currentFrame][getIndex(x, y)], currentColor);
+  }
+
+  function handleDown(e) {
+    setMouseDown(true);
+    handleDraw(e);
+  }
+  function handleUp() { setMouseDown(false); }
+  function handleMove(e) { if (mouseDown) handleDraw(e); }
+  function handleLeave() { setMouseDown(false); }
+
+  // --- Flood Fill (simple iterative, no recursion) ---
+  function fill(x, y, targetColor, replacementColor) {
+    if (targetColor === replacementColor) return;
+    setFrames(prev => {
+      const newFrames = [...prev];
+      const frame = [...newFrames[currentFrame]];
+      const stack = [[x, y]];
+      while (stack.length) {
+        const [px, py] = stack.pop();
+        if (
+          px >= 0 && px < SPRITE_SIZE && py >= 0 && py < SPRITE_SIZE &&
+          frame[getIndex(px, py)] === targetColor
+        ) {
+          frame[getIndex(px, py)] = replacementColor;
+          stack.push([px + 1, py], [px - 1, py], [px, py + 1], [px, py - 1]);
+        }
+      }
+      newFrames[currentFrame] = frame;
+      return newFrames;
+    });
+  }
+
+  // --- Frame management ---
+  function addFrame() {
+    const newFrames = [...frames];
+    newFrames.splice(currentFrame + 1, 0, blankFrame());
+    setFrames(newFrames);
+    setCurrentFrame(currentFrame + 1);
+  }
+  function duplicateFrame() {
+    const newFrames = [...frames];
+    newFrames.splice(currentFrame + 1, 0, copyFrame(frames[currentFrame]));
+    setFrames(newFrames);
+    setCurrentFrame(currentFrame + 1);
+  }
+  function deleteFrame() {
+    if (frames.length <= 1) return;
+    const newFrames = frames.filter((_, idx) => idx !== currentFrame);
+    setFrames(newFrames);
+    setCurrentFrame(f => Math.max(0, Math.min(f, newFrames.length - 1)));
+  }
+
+  // --- Palette management ---
+  function addPaletteColor(color) {
+    if (!palette.includes(color)) setPalette([...palette, color]);
+  }
+  function removePaletteColor(color) {
+    if (palette.length > 2) setPalette(palette.filter(c => c !== color));
+  }
+
+  // --- Save/Load ---
+  function saveProject() {
+    if (!projectName.trim()) return alert('Name required!');
+    const thumb = renderFrameToDataURL(frames[0], 3);
+    const proj = {
+      id: Date.now().toString(),
+      name: projectName,
+      frames,
+      palette,
+      date: new Date().toISOString(),
+      thumbnail: thumb,
+      fps
+    };
+    let saved = [];
+    try {
+      saved = JSON.parse(localStorage.getItem('spriteProjects') || '[]');
+    } catch {}
+    const existing = saved.findIndex(p => p.name === projectName);
+    if (existing >= 0) saved[existing] = proj;
+    else saved.unshift(proj);
+    if (saved.length > 20) saved = saved.slice(0, 20);
+    localStorage.setItem('spriteProjects', JSON.stringify(saved));
+    setSavedProjects(saved);
+    setShowSaveModal(false);
+    alert('Project saved!');
+  }
+
+  function loadProject(project) {
+    setFrames(project.frames);
+    setCurrentFrame(0);
+    setPalette(project.palette || DEFAULT_COLORS);
+    setProjectName(project.name);
+    setFps(project.fps || 8);
+    setShowLoadModal(false);
+  }
+
+  function deleteProject(id) {
+    if (!window.confirm('Delete this project?')) return;
+    const updated = savedProjects.filter(p => p.id !== id);
+    localStorage.setItem('spriteProjects', JSON.stringify(updated));
+    setSavedProjects(updated);
+  }
+
+  // --- Export GIF ---
+  function exportGif() {
+    if (!window.GIF) {
+      alert('GIF.js not loaded!');
+      return;
+    }
+    const gif = new window.GIF({
+      workers: 2,
+      quality: 10,
+      width: SPRITE_SIZE * 3,
+      height: SPRITE_SIZE * 3,
+      workerScript: 'gif.worker.js'
+    });
+    frames.forEach(f => {
+      const img = new window.Image();
+      img.src = renderFrameToDataURL(f, 3);
+      gif.addFrame(img, { delay: 1000 / fps, copy: true });
+    });
+    gif.on('finished', (blob) => {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${projectName || 'sprite'}.gif`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+    gif.render();
+  }
+
+  // --- Render frame as data URL (for export and preview) ---
+  function renderFrameToDataURL(frame, scale = 1) {
+    const s = SPRITE_SIZE * scale;
+    const c = document.createElement('canvas');
+    c.width = c.height = s;
+    const ctx = c.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+    for (let y = 0; y < SPRITE_SIZE; y++) {
+      for (let x = 0; x < SPRITE_SIZE; x++) {
+        ctx.fillStyle = frame[getIndex(x, y)] || '#00000000';
+        ctx.fillRect(x * scale, y * scale, scale, scale);
+      }
+    }
+    return c.toDataURL();
+  }
+
+  // --- UI ---
+  return (
+    <div className="flex flex-col min-h-screen bg-gray-100">
+      <h1 className="text-xl sm:text-2xl font-bold mb-2 sm:mb-4 text-center">
+        Pixel Art Sprite Editor
+      </h1>
+      <div className="flex flex-col md:flex-row flex-1 gap-3 sm:gap-4 px-2 pb-4">
+        {/* Tools */}
+        <div className="w-full md:w-60 flex flex-col gap-4 p-3 bg-white rounded-lg shadow-md order-2 md:order-1 overflow-y-auto">
+          {/* Project Name */}
+          <div>
+            <label className="font-semibold text-sm">Project Name</label>
+            <input
+              type="text"
+              className="w-full p-2 border border-gray-300 rounded mt-1 text-sm"
+              value={projectName}
+              onChange={e => setProjectName(e.target.value)}
+              placeholder="Sprite name"
+            />
+          </div>
+          {/* Tools */}
+          <div>
+            <h2 className="font-semibold text-sm mb-1">Tools</h2>
+            <div className="flex gap-2 mb-1">
+              {[
+                ['brush', '🖌️'], ['eraser', '🧽'], ['fill', '🪣']
+              ].map(([t, icon]) => (
+                <button
+                  key={t}
+                  className={`px-2 py-1 rounded ${tool === t ? 'bg-blue-500 text-white' : 'bg-gray-200 hover:bg-gray-300'}`}
+                  onClick={() => setTool(t)}
+                  title={t[0].toUpperCase() + t.slice(1)}
+                >{icon}</button>
+              ))}
+            </div>
+            <span className="text-xs text-gray-500">
+              B: Brush, E: Eraser, F: Fill, D: Duplicate, ←/→: Frames, Space: Play
+            </span>
+          </div>
+          {/* Palette */}
+          <div>
+            <h2 className="font-semibold text-sm mb-1">Palette</h2>
+            <div className="flex flex-wrap gap-1">
+              {palette.map(c => (
+                <button
+                  key={c}
+                  className={`w-6 h-6 rounded border-2 ${currentColor === c ? 'border-black' : 'border-gray-300'}`}
+                  style={{ background: c }}
+                  onClick={() => setCurrentColor(c)}
+                  onContextMenu={e => { e.preventDefault(); removePaletteColor(c); }}
+                  title={c}
+                />
+              ))}
+              <input
+                type="color"
+                value={currentColor}
+                onChange={e => { setCurrentColor(e.target.value); addPaletteColor(e.target.value); }}
+                className="w-6 h-6 p-0 border border-gray-300 rounded"
+                title="Pick color"
+              />
+            </div>
+            <span className="text-xs text-gray-500">Right-click swatch to remove.</span>
+          </div>
+          {/* Animation */}
+          <div>
+            <h2 className="font-semibold text-sm">Animation</h2>
+            <div className="flex items-center gap-2">
+              <label className="text-sm">FPS:</label>
+              <input
+                type="range" min="1" max="24" value={fps}
+                onChange={e => setFps(+e.target.value)} />
+              <span className="text-xs">{fps}</span>
+            </div>
+          </div>
+          {/* Save/Load/Export */}
+          <div className="flex flex-col gap-2 border-t pt-2 mt-2">
+            <button className="bg-green-500 text-white rounded p-2 hover:bg-green-600" onClick={() => setShowSaveModal(true)}>💾 Save</button>
+            <button className="bg-blue-500 text-white rounded p-2 hover:bg-blue-600" onClick={() => setShowLoadModal(true)}>📂 Load</button>
+            <button className="bg-pink-500 text-white rounded p-2 hover:bg-pink-600" onClick={exportGif}>🎞️ Export GIF</button>
+          </div>
+        </div>
+        {/* Main Canvas Area */}
+        <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-lg shadow-md p-2 order-1 md:order-2">
+          {/* Sprite Editing Canvas */}
+          <canvas
+            ref={canvasRef}
+            width={DISPLAY_SIZE}
+            height={DISPLAY_SIZE}
+            style={{ width: '100%', maxWidth: 512, height: 'auto', touchAction: 'none', background: '#fff', cursor: tool === 'brush' ? 'crosshair' : tool === 'eraser' ? 'not-allowed' : 'cell', imageRendering: 'pixelated' }}
+            onMouseDown={handleDown}
+            onMouseMove={handleMove}
+            onMouseUp={handleUp}
+            onMouseLeave={handleLeave}
+            onTouchStart={handleDown}
+            onTouchMove={handleMove}
+            onTouchEnd={handleUp}
+            tabIndex={0}
+          />
+          {/* Frame Controls */}
+          <div className="flex gap-1 mt-2 items-center flex-wrap">
+            <button className="p-2 bg-gray-200 rounded hover:bg-gray-300" onClick={() => setCurrentFrame(f => Math.max(0, f - 1))}>←</button>
+            <span className="font-semibold text-sm">Frame {currentFrame + 1} / {frames.length}</span>
+            <button className="p-2 bg-gray-200 rounded hover:bg-gray-300" onClick={() => setCurrentFrame(f => Math.min(frames.length - 1, f + 1))}>→</button>
+            <button className="p-2 bg-blue-200 rounded hover:bg-blue-300" onClick={addFrame} title="Add frame">＋</button>
+            <button className="p-2 bg-yellow-200 rounded hover:bg-yellow-300" onClick={duplicateFrame} title="Duplicate">⧉</button>
+            <button className="p-2 bg-red-200 rounded hover:bg-red-300" onClick={deleteFrame} title="Delete">🗑️</button>
+            <button className={`p-2 rounded ${isPlaying ? 'bg-green-300' : 'bg-gray-200'} hover:bg-green-400`} onClick={() => setIsPlaying(p => !p)}>{isPlaying ? '⏸️ Pause' : '▶️ Play'}</button>
+          </div>
+          {/* Preview */}
+          <div className="mt-3 flex flex-col items-center gap-1">
+            <div className="flex gap-3">
+              <div>
+                <div className="text-xs text-gray-600 text-center">1x</div>
+                <img src={renderFrameToDataURL(frames[currentFrame], 1)} style={{ width: SPRITE_SIZE * 3, height: SPRITE_SIZE * 3, imageRendering: 'pixelated' }} alt="preview" />
+              </div>
+              <div>
+                <div className="text-xs text-gray-600 text-center">{previewScale}x</div>
+                <img src={renderFrameToDataURL(frames[currentFrame], previewScale)} style={{ width: SPRITE_SIZE * 3 * previewScale, height: SPRITE_SIZE * 3 * previewScale, imageRendering: 'pixelated', border: '1px solid #aaa' }} alt="preview" />
+              </div>
+            </div>
+            <div className="flex gap-1 mt-1">
+              {[1, 2, 3, 4, 6, 8].map(s =>
+                <button key={s} className={`p-1 rounded border ${previewScale === s ? 'border-blue-500' : 'border-gray-200'}`} onClick={() => setPreviewScale(s)}>{s}x</button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+      {/* Save Modal */}
+      {showSaveModal &&
+        <Modal title="Save Project" onClose={() => setShowSaveModal(false)}>
+          <div className="flex flex-col gap-3">
+            <label className="text-sm font-semibold">
+              Project Name
+              <input
+                type="text"
+                value={projectName}
+                onChange={e => setProjectName(e.target.value)}
+                className="w-full border border-gray-300 rounded px-2 py-1 mt-1"
+              />
+            </label>
+            <button
+              onClick={saveProject}
+              className="bg-green-500 text-white rounded p-2 font-semibold hover:bg-green-600"
+            >
+              Save
+            </button>
+          </div>
+        </Modal>
+      }
+      {/* Load Modal */}
+      {showLoadModal &&
+        <Modal title="Load Project" onClose={() => setShowLoadModal(false)}>
+          <div className="flex flex-col gap-3 max-h-[60vh] overflow-y-auto">
+            {savedProjects.length === 0 &&
+              <span className="text-gray-500 text-sm">No saved projects.</span>}
+            {savedProjects.map(project => (
+              <div key={project.id} className="flex flex-row gap-2 items-center border rounded p-2">
+                {project.thumbnail ?
+                  <img src={project.thumbnail} alt="" className="w-10 h-10 object-cover rounded border" /> :
+                  <div className="w-10 h-10 bg-gray-200 rounded flex items-center justify-center text-xs">No Image</div>}
+                <div className="flex-1">
+                  <div className="font-bold text-sm">{project.name}</div>
+                  <div className="text-xs text-gray-400">{new Date(project.date).toLocaleString()}</div>
+                </div>
+                <button onClick={() => loadProject(project)} className="p-1 text-green-700 hover:bg-green-100 rounded">✔️</button>
+                <button onClick={() => deleteProject(project.id)} className="p-1 text-red-700 hover:bg-red-100 rounded">🗑️</button>
+              </div>
+            ))}
+          </div>
+        </Modal>
+      }
+      {/* Footer */}
+      <footer className="w-full text-center text-xs text-gray-400 mt-4 mb-1">
+        Pixel Sprite Editor · Mouse/touch to paint · Keyboard: B/E/F/D/←/→/Space
+      </footer>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(SpriteEditor));
