@@ -43,6 +43,7 @@ function SpriteEditor() {
   const [palette, setPalette] = useState(DEFAULT_COLORS);
   const [tool, setTool] = useState('brush'); // brush | eraser | fill
   const [mouseDown, setMouseDown] = useState(false);
+  const [moveStart, setMoveStart] = useState(null);
 
   // --- UI State ---
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -163,7 +164,42 @@ function drawFrame(ctx, frame, tintColor) {
   ctx.globalAlpha = 1.0;
 }
 
+// Helper: Move tool
+function canMoveFrame(frame, dx, dy) {
+  for (let y = 0; y < SPRITE_SIZE; y++) {
+    for (let x = 0; x < SPRITE_SIZE; x++) {
+      const color = frame[getIndex(x, y)];
+      if (color && color.length !== 9 && color !== '#00000000') {
+        const newX = x + dx;
+        const newY = y + dy;
+        if (newX < 0 || newX >= SPRITE_SIZE || newY < 0 || newY >= SPRITE_SIZE) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
 
+function moveFrame(frame, dx, dy) {
+  const newFrame = Array(SPRITE_SIZE * SPRITE_SIZE).fill('#00000000');
+  for (let y = 0; y < SPRITE_SIZE; y++) {
+    for (let x = 0; x < SPRITE_SIZE; x++) {
+      const color = frame[getIndex(x, y)];
+      if (color && color.length !== 9 && color !== '#00000000') {
+        const newX = x + dx;
+        const newY = y + dy;
+        if (newX >= 0 && newX < SPRITE_SIZE && newY >= 0 && newY < SPRITE_SIZE) {
+          newFrame[getIndex(newX, newY)] = color;
+        }
+      }
+    }
+  }
+  return newFrame;
+}
+
+
+  
   // --- Get pixel position from mouse event ---
   function getPixelPos(e) {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -203,12 +239,48 @@ function drawFrame(ctx, frame, tintColor) {
     if (tool === 'fill') fill(x, y, frames[currentFrame][getIndex(x, y)], currentColor);
   }
 
-  function handleDown(e) {
+function handleDown(e) {
+  if (tool === 'move') {
+    const [x, y] = getPixelPos(e);
+    setMoveStart([x, y]);
+    setMouseDown(true);
+  } else {
     setMouseDown(true);
     handleDraw(e);
   }
-  function handleUp() { setMouseDown(false); }
-  function handleMove(e) { if (mouseDown) handleDraw(e); }
+}
+
+  function handleUp() {
+    setMouseDown(false);
+    setMoveStart(null);
+  }
+
+  
+  function handleMove(e) {
+    if (tool === 'move' && mouseDown && moveStart) {
+      const [x, y] = getPixelPos(e);
+      const [startX, startY] = moveStart;
+      const dx = x - startX;
+      const dy = y - startY;
+      if (dx === 0 && dy === 0) return;
+  
+      // Only allow moving if frame stays in bounds
+      const frame = frames[currentFrame];
+      if (canMoveFrame(frame, dx, dy)) {
+        setFrames(prev => {
+          const newFrames = [...prev];
+          newFrames[currentFrame] = moveFrame(frame, dx, dy);
+          return newFrames;
+        });
+        setMoveStart([x, y]);
+      }
+    } else if (mouseDown) {
+      handleDraw(e);
+    }
+  }
+
+
+  
   function handleLeave() { setMouseDown(false); }
 
   // --- Flood Fill (simple iterative, no recursion) ---
@@ -421,7 +493,7 @@ function importFromFile(e) {
             <h2 className="font-semibold text-sm mb-1">Tools</h2>
             <div className="flex gap-2 mb-1">
               {[
-                ['brush', '🖌️'], ['eraser', '🧽'], ['fill', '🪣']
+                ['brush', '🖌️'], ['eraser', '🧽'], ['fill', '🪣'], ['move', '✥']
               ].map(([t, icon]) => (
                 <button
                   key={t}
